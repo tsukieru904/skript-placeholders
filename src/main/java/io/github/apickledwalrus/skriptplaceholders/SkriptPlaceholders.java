@@ -53,12 +53,6 @@ public class SkriptPlaceholders extends JavaPlugin {
 		}
 	}
 
-	/**
-	 * Skript Folia builds may expose a version such as "2.16.0-folia-1".
-	 * Skript's internal Version parser can treat the fork suffix as a lower
-	 * version, even though the base Skript release is 2.16.0. Compare only
-	 * the numeric release components so patched/forked builds remain supported.
-	 */
 	private boolean isSupportedSkriptVersion(String version) {
 		if (version == null) {
 			return false;
