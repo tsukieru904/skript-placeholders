@@ -66,8 +66,8 @@ tasks.register('verifyJava21Bytecode') {
         new java.util.zip.ZipFile(jarFile).withCloseable { zip ->
             zip.entries().findAll { it.name.endsWith('.class') }.each { entry ->
                 new DataInputStream(zip.getInputStream(entry)).withCloseable { input ->
-                    def magic = input.readInt()
-                    if (magic != 0xCAFEBABE) {
+                    def magic = input.readInt() & 0xFFFFFFFFL
+                    if (magic != 0xCAFEBABEL) {
                         throw new GradleException("Invalid class file: ${entry.name}")
                     }
                     input.readUnsignedShort() // minor
