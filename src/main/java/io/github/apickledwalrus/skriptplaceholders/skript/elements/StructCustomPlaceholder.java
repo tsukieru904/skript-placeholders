@@ -18,8 +18,12 @@ import io.github.apickledwalrus.skriptplaceholders.placeholder.PlaceholderEvalua
 import io.github.apickledwalrus.skriptplaceholders.placeholder.PlaceholderRegistry;
 import io.github.apickledwalrus.skriptplaceholders.skript.PlaceholderEvent;
 import io.github.apickledwalrus.skriptplaceholders.placeholder.PlaceholderPlugin;
+import io.github.apickledwalrus.skriptplaceholders.util.FoliaScheduler;
 import io.github.apickledwalrus.skriptplaceholders.skript.RelationalPlaceholderEvent;
-import org.bukkit.Bukkit;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
@@ -71,6 +75,14 @@ public class StructCustomPlaceholder extends Structure implements PlaceholderEva
 	private boolean isRelational;
 	private Trigger trigger;
 
+	/*
+	 * PlaceholderAPI exposes a synchronous return type. On Folia we cannot block one region
+	 * while another region evaluates a Skript trigger, so cross-region requests use the most
+	 * recently computed value and schedule a refresh for the next safe entity/global context.
+	 */
+	private final ConcurrentMap<CacheKey, String> cachedResults = new ConcurrentHashMap<>();
+	private final ConcurrentMap<CacheKey, Boolean> pendingEvaluations = new ConcurrentHashMap<>();
+
 	@Override
 	public boolean init(Literal<?> @NotNull [] args, int matchedPattern, @NotNull ParseResult parseResult, @Nullable EntryContainer entryContainer) {
 		plugin = PlaceholderPlugin.values()[matchedPattern <= 1 ? matchedPattern : matchedPattern - 2];
@@ -110,29 +122,12 @@ public class StructCustomPlaceholder extends Structure implements PlaceholderEva
 		trigger.setLineNumber(lineNumber);
 		trigger.setDebugLabel(script + ": line " + lineNumber);
 
-		// see https://github.com/APickledWalrus/skript-placeholders/issues/40
-		// ensure registration is on the main thread
-		if (Bukkit.isPrimaryThread()) {
-			registry.registerPlaceholder(plugin, placeholder, this);
-		} else {
-			Bukkit.getScheduler().runTask(SkriptPlaceholders.getInstance(),
-					() -> registry.registerPlaceholder(plugin, placeholder, this)
-			);
-		}
+		// Placeholder providers mutate global registration state. On Folia this must happen on
+		// the global region; on Paper the helper executes immediately on the main thread.
+		FoliaScheduler.runGlobal(SkriptPlaceholders.getInstance(),
+				() -> registry.registerPlaceholder(plugin, placeholder, this));
 
 		return true;
-	}
-
-	@Override
-	public void unload() {
-		// to be safe, ensure unregistering is done on the main thread too
-		if (Bukkit.isPrimaryThread()) {
-			registry.unregisterPlaceholder(plugin, placeholder, this);
-		} else {
-			Bukkit.getScheduler().runTask(SkriptPlaceholders.getInstance(),
-					() -> registry.unregisterPlaceholder(plugin, placeholder, this)
-			);
-		}
 	}
 
 	@Override
@@ -152,9 +147,26 @@ public class StructCustomPlaceholder extends Structure implements PlaceholderEva
 		if (isRelational) { // a relational placeholder structure cannot evaluate non-relational placeholders
 			return null;
 		}
-		PlaceholderEvent event = new PlaceholderEvent(placeholder, player);
-		trigger.execute(event);
-		return event.getResult();
+
+		CacheKey key = new CacheKey(this, placeholder, player == null ? null : player.getUniqueId(), null);
+		String cached = cachedResults.get(key);
+		if (pendingEvaluations.putIfAbsent(key, Boolean.TRUE) == null) {
+			boolean ranNow = FoliaScheduler.runForPlayer(SkriptPlaceholders.getInstance(), player, () -> {
+				try {
+					PlaceholderEvent event = new PlaceholderEvent(placeholder, player);
+					trigger.execute(event);
+					if (event.getResult() != null) {
+						cachedResults.put(key, event.getResult());
+					}
+				} finally {
+					pendingEvaluations.remove(key);
+				}
+			});
+			if (ranNow) {
+				cached = cachedResults.get(key);
+			}
+		}
+		return cached;
 	}
 
 	@Override
@@ -162,9 +174,68 @@ public class StructCustomPlaceholder extends Structure implements PlaceholderEva
 		if (!isRelational) { // a non-relational placeholder structure cannot evaluate relational placeholders
 			return null;
 		}
-		RelationalPlaceholderEvent event = new RelationalPlaceholderEvent(placeholder, one, two);
-		trigger.execute(event);
-		return event.getResult();
+
+		CacheKey key = new CacheKey(this, placeholder, one.getUniqueId(), two.getUniqueId());
+		String cached = cachedResults.get(key);
+		if (pendingEvaluations.putIfAbsent(key, Boolean.TRUE) == null) {
+			boolean ranNow = FoliaScheduler.runRelational(SkriptPlaceholders.getInstance(), one, two, () -> {
+				try {
+					RelationalPlaceholderEvent event = new RelationalPlaceholderEvent(placeholder, one, two);
+					trigger.execute(event);
+					if (event.getResult() != null) {
+						cachedResults.put(key, event.getResult());
+					}
+				} finally {
+					pendingEvaluations.remove(key);
+				}
+			});
+			if (ranNow) {
+				cached = cachedResults.get(key);
+			}
+			// When the two players are owned by different regions, the current placeholder API
+			// request cannot be made safe by waiting. Keep the previous value instead.
+			if (!ranNow) {
+				pendingEvaluations.remove(key);
+			}
+		}
+		return cached;
 	}
+
+	@Override
+	public void unload() {
+		cachedResults.keySet().removeIf(key -> key.owner == this);
+		pendingEvaluations.keySet().removeIf(key -> key.owner == this);
+		FoliaScheduler.runGlobal(SkriptPlaceholders.getInstance(),
+				() -> registry.unregisterPlaceholder(plugin, placeholder, this));
+	}
+
+	private static final class CacheKey {
+		private final StructCustomPlaceholder owner;
+		private final String placeholder;
+		private final UUID first;
+		private final UUID second;
+
+		private CacheKey(StructCustomPlaceholder owner, String placeholder, UUID first, UUID second) {
+			this.owner = owner;
+			this.placeholder = placeholder;
+			this.first = first;
+			this.second = second;
+		}
+
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj) return true;
+			if (!(obj instanceof CacheKey other)) return false;
+			return owner == other.owner && java.util.Objects.equals(placeholder, other.placeholder)
+					&& java.util.Objects.equals(first, other.first) && java.util.Objects.equals(second, other.second);
+		}
+
+		@Override
+		public int hashCode() {
+			return java.util.Objects.hash(System.identityHashCode(owner), placeholder, first, second);
+		}
+	}
+
 
 }

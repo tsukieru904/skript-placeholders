@@ -35,3 +35,18 @@ Documentation is available on the following platforms:
 [![Get on skUnity](https://docs.skunity.com/skunity/library/Docs/Assets/assets/images/buttons/v2/get-the-syntax-square.png)](https://docs.skunity.com/syntax/search/addon:skript-placeholders)
 
 [![SkriptHubViewTheDocs](http://skripthub.net/static/addon/ViewTheDocsButton.png)](http://skripthub.net/docs/?addon=skript-placeholders)
+## Compatibility
+
+This build targets **Paper 26.2** and **Java 25**, and is marked as **Folia-supported**. It uses Paper/Folia region and global schedulers instead of the legacy Bukkit scheduler.
+
+Requires **Skript 2.16.0+**. PlaceholderAPI support is built against **2.12.3+**.
+
+For relational placeholders on Folia, both players should ideally be in the same region when a Skript trigger directly accesses both player objects; Folia does not provide a scheduler that owns entities in separate regions.
+
+## Folia / Paper 26.2
+
+This build targets Paper 26.2 and supports Folia. It uses the Folia global and entity schedulers instead of the legacy Bukkit scheduler. Placeholder callbacks must not block a region while waiting for another region.
+
+For custom Skript placeholders, requests that arrive outside the player-owning region are scheduled on the player entity scheduler and return the most recently evaluated value. Relational placeholders are evaluated only when the current region owns both players; when the players are in separate regions, the last cached value is returned instead of performing an unsafe cross-region access.
+
+Build with Java 25.

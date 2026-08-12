@@ -11,6 +11,8 @@ import ch.njol.skript.lang.SkriptParser.ParseResult;
 import ch.njol.skript.lang.util.SimpleExpression;
 import ch.njol.util.Kleenean;
 import io.github.apickledwalrus.skriptplaceholders.placeholder.PlaceholderPlugin;
+import io.github.apickledwalrus.skriptplaceholders.SkriptPlaceholders;
+import io.github.apickledwalrus.skriptplaceholders.util.FoliaScheduler;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
@@ -19,6 +21,9 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Name("Placeholder Value")
 @Description("An expression to obtain the value of a placeholder from a supported plugin.")
@@ -35,6 +40,9 @@ import java.util.List;
 })
 @Since("1.0.0, 1.2.0 (MVdWPlaceholderAPI support), 1.7.0 (relational placeholder support)")
 public class ExprPlaceholderValue extends SimpleExpression<String> {
+
+	private static final ConcurrentMap<CacheKey, String> CACHE = new ConcurrentHashMap<>();
+	private static final ConcurrentMap<CacheKey, Boolean> PENDING = new ConcurrentHashMap<>();
 
 	static {
 		Skript.registerExpression(ExprPlaceholderValue.class, String.class, ExpressionType.COMBINED,
@@ -84,14 +92,28 @@ public class ExprPlaceholderValue extends SimpleExpression<String> {
 		List<String> values = new ArrayList<>();
 		for (OfflinePlayer player : players) {
 			for (String placeholder : placeholders) {
-				// try to find a plugin this placeholder works for
+				String value = null;
 				for (PlaceholderPlugin plugin : PlaceholderPlugin.getInstalledPlugins()) {
-					String value = plugin.parsePlaceholder(placeholder, player);
-					if (value != null) {
-						values.add(value);
-						break; // worked with this plugin, move onto next placeholder
+					CacheKey key = new CacheKey(plugin, placeholder, player == null ? null : player.getUniqueId(), null);
+					String cached = CACHE.get(key);
+					if (PENDING.putIfAbsent(key, Boolean.TRUE) == null) {
+						final String[] result = new String[1];
+						boolean ranNow = FoliaScheduler.runForPlayer(SkriptPlaceholders.getInstance(), player, () -> {
+							try {
+								result[0] = plugin.parsePlaceholder(placeholder, player);
+								if (result[0] != null) CACHE.put(key, result[0]);
+							} finally {
+								PENDING.remove(key);
+							}
+						});
+						if (ranNow) cached = result[0];
+					}
+					if (cached != null) {
+						value = cached;
+						break;
 					}
 				}
+				if (value != null) values.add(value);
 			}
 		}
 		return values.toArray(new String[0]);
@@ -100,20 +122,33 @@ public class ExprPlaceholderValue extends SimpleExpression<String> {
 	private static String[] parseRelationalPlaceholders(String[] placeholders, Player one, Player two) {
 		List<String> values = new ArrayList<>();
 		for (String placeholder : placeholders) {
-			// try to find a plugin this placeholder works for
 			for (PlaceholderPlugin plugin : PlaceholderPlugin.getInstalledPlugins()) {
-				if (!plugin.supportsRelationalPlaceholders()) {
-					continue;
+				if (!plugin.supportsRelationalPlaceholders()) continue;
+				CacheKey key = new CacheKey(plugin, placeholder, one.getUniqueId(), two.getUniqueId());
+				String value = CACHE.get(key);
+				if (PENDING.putIfAbsent(key, Boolean.TRUE) == null) {
+					final String[] result = new String[1];
+					boolean ranNow = FoliaScheduler.runRelational(SkriptPlaceholders.getInstance(), one, two, () -> {
+						try {
+							result[0] = plugin.parseRelationalPlaceholder(placeholder, one, two);
+							if (result[0] != null) CACHE.put(key, result[0]);
+						} finally {
+							PENDING.remove(key);
+						}
+					});
+					if (ranNow) value = result[0];
+					if (!ranNow) PENDING.remove(key);
 				}
-				String value = plugin.parseRelationalPlaceholder(placeholder, one, two);
 				if (value != null) {
 					values.add(value);
-					break; // worked with this plugin, move onto next placeholder
+					break;
 				}
 			}
 		}
 		return values.toArray(new String[0]);
 	}
+
+	private record CacheKey(PlaceholderPlugin plugin, String placeholder, UUID first, UUID second) {}
 
 	@Override
 	public boolean isSingle() {

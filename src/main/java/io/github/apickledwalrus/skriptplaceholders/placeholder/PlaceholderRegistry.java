@@ -2,13 +2,13 @@ package io.github.apickledwalrus.skriptplaceholders.placeholder;
 
 import org.bukkit.plugin.Plugin;
 
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
 public class PlaceholderRegistry {
 
 	private final Plugin plugin;
-	private final Map<PlaceholderPlugin, PlaceholderRegister> registers = new HashMap<>();
+	private final Map<PlaceholderPlugin, PlaceholderRegister> registers = new ConcurrentHashMap<>();
 
 	public PlaceholderRegistry(Plugin plugin) {
 		this.plugin = plugin;
@@ -29,7 +29,7 @@ public class PlaceholderRegistry {
 	private final class PlaceholderRegister {
 
 		private final PlaceholderPlugin plugin;
-		private final Map<String, PlaceholderListener> listeners = new HashMap<>();
+		private final Map<String, PlaceholderListener> listeners = new ConcurrentHashMap<>();
 
 		public PlaceholderRegister(PlaceholderPlugin plugin) {
 			this.plugin = plugin;

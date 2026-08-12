@@ -4,7 +4,7 @@ import be.maximvdw.placeholderapi.PlaceholderAPI;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.plugin.Plugin;
 
-import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Set;
 
 /**
@@ -15,8 +15,8 @@ public class MVdWPlaceholderAPIListener implements PlaceholderListener {
 	private final Plugin plugin;
 	private final String placeholder;
 
-	private final Set<PlaceholderEvaluator> evaluators = new HashSet<>();
-	private boolean isInvalid;
+	private final Set<PlaceholderEvaluator> evaluators = ConcurrentHashMap.newKeySet();
+	private volatile boolean isInvalid;
 
 	public MVdWPlaceholderAPIListener(Plugin plugin, String placeholder) {
 		this.plugin = plugin;

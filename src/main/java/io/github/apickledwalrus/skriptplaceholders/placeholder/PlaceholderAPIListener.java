@@ -8,7 +8,7 @@ import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.HashSet;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Set;
 
 /**
@@ -19,7 +19,7 @@ public class PlaceholderAPIListener extends PlaceholderExpansion implements Rela
 	private final Plugin plugin;
 	private final String prefix;
 
-	private final Set<PlaceholderEvaluator> evaluators = new HashSet<>();
+	private final Set<PlaceholderEvaluator> evaluators = ConcurrentHashMap.newKeySet();
 
 	public PlaceholderAPIListener(Plugin plugin, String prefix) {
 		this.plugin = plugin;

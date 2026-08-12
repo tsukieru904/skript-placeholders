@@ -1,6 +1,5 @@
 package io.github.apickledwalrus.skriptplaceholders.skript;
 
-import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
@@ -19,8 +18,8 @@ public class PlaceholderEvent extends Event {
 	private @Nullable String result;
 
 	public PlaceholderEvent(String placeholder, @Nullable OfflinePlayer player) {
-		// Declare the event as sync or async.
-		super(!Bukkit.getServer().isPrimaryThread());
+		// This event is always executed by this addon on a valid Paper/Folia scheduler context.
+		super(false);
 
 		this.placeholder = placeholder;
 		int underscorePos = placeholder.indexOf("_");
