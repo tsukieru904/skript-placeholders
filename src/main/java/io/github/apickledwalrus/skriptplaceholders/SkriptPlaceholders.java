@@ -1,7 +1,6 @@
 package io.github.apickledwalrus.skriptplaceholders;
 
 import ch.njol.skript.Skript;
-import ch.njol.skript.util.Version;
 import io.github.apickledwalrus.skriptplaceholders.placeholder.PlaceholderPlugin;
 import io.github.apickledwalrus.skriptplaceholders.placeholder.PlaceholderRegistry;
 import org.bukkit.plugin.Plugin;
@@ -29,8 +28,9 @@ public class SkriptPlaceholders extends JavaPlugin {
 			getServer().getPluginManager().disablePlugin(this);
 			return;
 		}
-		if (Skript.getVersion().isSmallerThan(new Version(2, 16, 0))) {
-			getLogger().severe("You are running an unsupported version of Skript. Please update to at least Skript 2.16.0. Disabling...");
+		String skriptVersion = Skript.getVersion().toString();
+		if (!isSupportedSkriptVersion(skriptVersion)) {
+			getLogger().severe("You are running an unsupported version of Skript (" + skriptVersion + "). Please update to at least Skript 2.16.0. Disabling...");
 			getServer().getPluginManager().disablePlugin(this);
 			return;
 		}
@@ -51,6 +51,48 @@ public class SkriptPlaceholders extends JavaPlugin {
 			getLogger().severe(e.toString());
 			getServer().getPluginManager().disablePlugin(this);
 		}
+	}
+
+	/**
+	 * Skript Folia builds may expose a version such as "2.16.0-folia-1".
+	 * Skript's internal Version parser can treat the fork suffix as a lower
+	 * version, even though the base Skript release is 2.16.0. Compare only
+	 * the numeric release components so patched/forked builds remain supported.
+	 */
+	private boolean isSupportedSkriptVersion(String version) {
+		if (version == null) {
+			return false;
+		}
+
+		String[] parts = version.trim().split("\\.");
+		int[] required = {2, 16, 0};
+
+		for (int i = 0; i < required.length; i++) {
+			if (i >= parts.length) {
+				return false;
+			}
+
+			String numeric = parts[i].replaceFirst("^\\D*(\\d+).*$", "$1");
+			if (!numeric.matches("\\d+")) {
+				return false;
+			}
+
+			int current;
+			try {
+				current = Integer.parseInt(numeric);
+			} catch (NumberFormatException ignored) {
+				return false;
+			}
+
+			if (current > required[i]) {
+				return true;
+			}
+			if (current < required[i]) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	@Override
