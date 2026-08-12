@@ -7,9 +7,18 @@ plugins {
 compileJava.options.encoding = 'UTF-8'
 
 java {
+    // Keep the plugin bytecode compatible with every Paper version supported by
+    // Skript 2.16.0 (1.21.4 through 26.2). Paper 1.20-1.21.11 runs on Java 21,
+    // while Paper 26.1+ runs on Java 25; Java 21 bytecode runs on both.
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(25))
+        languageVersion.set(JavaLanguageVersion.of(21))
     }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // Be explicit so the produced class files never accidentally move above
+    // Java 21 even if the build JDK changes in CI.
+    options.release.set(21)
 }
 
 repositories {
@@ -23,7 +32,7 @@ repositories {
 
 dependencies {
     implementation group: 'org.jetbrains', name: 'annotations', version: '24.1.0'
-    compileOnly 'io.papermc.paper:paper-api:26.2.build.+'
+    compileOnly 'io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT'
     compileOnly ('com.github.SkriptLang:Skript:2.16.0') {
         transitive = false
     }
@@ -47,6 +56,33 @@ tasks.register('nightlyResources', ProcessResources) {
         ]
     }
     into 'build/resources/main'
+}
+
+tasks.register('verifyJava21Bytecode') {
+    dependsOn tasks.named('jar')
+    doLast {
+        def jarFile = tasks.named('jar').get().archiveFile.get().asFile
+        def maxMajor = 65 // Java 21 class-file version
+        new java.util.zip.ZipFile(jarFile).withCloseable { zip ->
+            zip.entries().findAll { it.name.endsWith('.class') }.each { entry ->
+                new DataInputStream(zip.getInputStream(entry)).withCloseable { input ->
+                    def magic = input.readInt()
+                    if (magic != 0xCAFEBABE) {
+                        throw new GradleException("Invalid class file: ${entry.name}")
+                    }
+                    input.readUnsignedShort() // minor
+                    def major = input.readUnsignedShort()
+                    if (major > maxMajor) {
+                        throw new GradleException("${entry.name} is compiled for Java class-file version ${major}; maximum supported is ${maxMajor} (Java 21).")
+                    }
+                }
+            }
+        }
+    }
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('verifyJava21Bytecode')
 }
 
 tasks.register('nightlyBuild', Jar) {
